@@ -122,7 +122,7 @@ Known caveats
 
 Protobuf `oneof` and OpenAPI `oneOf` have different semantics.
 In protobuf `oneof` denotes just a single group of alternatives, and you may have as many groups as you wish.
-In OpenAPI is a single property of the message that should list all possible combinations (Cartesian product).
+In OpenAPI it is a single property of the message that should list all possible combinations (Cartesian product).
 
 Hence, the following protobuf message:
 ```protobuf
