@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package mypackage;
+
+option go_package = "example.com/m/proto";
+
+import "google/protobuf/timestamp.proto";
+
+import "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/proto/crd.proto";
+
+message Place {
+    // Location address.
+    string address = 1;
+
+    // How many good deeds should be done here.
+    uint64 good_deeds_required = 2;
+}
+
+message Spec {
+    enum Strategy {
+        // Not specified, processed as DONT_BE_EVIL by operator.
+        DEFAULT = 0;
+
+        // Do good things.
+        BE_GOOD = 1;
+
+        // Don't do bad things.
+        DONT_BE_EVIL = 2;
+    }
+
+    // Behavioral strategy.
+    Strategy behavior = 1;
+
+    // Places where to perform good things.
+    repeated Place places = 2 [(protoc_gen_crd.k8s_patch) = {
+        merge_key: "address",
+        merge_strategy: "merge",
+    }];
+}
+
+message Condition {
+    enum State {
+        UNKNOWN = 0;
+        TRUE = 1;
+        FALSE = 2;
+    }
+
+    // Condition is set.
+    State state = 1;
+
+    // Additional info message about condition.
+    string info = 2;
+
+    // Moment when this condition occurred.
+    google.protobuf.Timestamp last_transition_time = 3;
+}
+
+message SyncStatus {
+    // Last generation that was observed by operator.
+    int64 observed_generation = 1;
+
+    // Last generation succesfully applied by operator.
+    int64 applied_generation = 2;
+
+    // Error message if any.
+    Condition error = 3;
+
+    // Success message if any.
+    Condition success = 4;
+}
+
+message Status {
+    // Spec apply info.
+    SyncStatus sync_status = 1;
+
+    // good deeds performed through the lifetime.
+    int64 good_deeds = 2;
+}
+
+message Human {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "example.com",
+        kind: "Human",
+        plural: "humans",
+        singular: "human",
+        categories: ["all", "example"],
+        additional_columns: [
+            {
+                name: "Gen",
+                type: CT_INTEGER,
+                description: "Object generation",
+                json_path: ".metadata.generation",
+            },
+            {
+                name: "Applied",
+                type: CT_INTEGER,
+                description: "Last applied generation",
+                json_path: ".status.sync_status.applied_generation",
+                priority: 10,
+            },
+            {
+                name: "Error",
+                type: CT_STRING,
+                description: "Error if any",
+                json_path: ".status.sync_status.error.info",
+                priority: 5,
+            },
+            {
+                name: "Occurred",
+                type: CT_DATE,
+                description: "When error occurred",
+                json_path: ".status.sync_status.error.last_transition_time",
+                priority: 5,
+            },
+            {
+                name: "Strategy",
+                type: CT_STRING,
+                description: "Current strategy",
+                json_path: ".spec.behavior",
+            }
+        ],
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+
+    // Default value that can be set on client and should be processed by your CLI, but is not available on server.
+    uint64 default_good_deeds_per_place = 3 [(protoc_gen_crd.schema) = SS_CLIENT];
+}

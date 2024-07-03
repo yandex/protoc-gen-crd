@@ -1,0 +1,15 @@
+{
+  ".":"infra/infractl/github/protoc-gen-crd",
+  "CODE_OF_CONDUCT.md":"infra/infractl/github/protoc-gen-crd/CODE_OF_CONDUCT.md",
+  "CONTRIBUTING.md":"infra/infractl/github/protoc-gen-crd/CONTRIBUTING.md",
+  "LICENSE":"infra/infractl/github/protoc-gen-crd/LICENSE",
+  "README.md":"infra/infractl/github/protoc-gen-crd/README.md",
+  "cmd/protoc-gen-crd/main.go":"library/go/k8s/protoc_gen_crd/main.go",
+  "example/Makefile":"infra/infractl/github/protoc-gen-crd/example/Makefile",
+  "example/go.mod":"infra/infractl/github/protoc-gen-crd/example/go.mod",
+  "example/go.sum":"infra/infractl/github/protoc-gen-crd/example/go.sum",
+  "example/main.go":"infra/infractl/github/protoc-gen-crd/example/main.go",
+  "example/proto/mycrd.proto":"infra/infractl/github/protoc-gen-crd/example/proto/mycrd.proto",
+  "go.mod":"infra/infractl/github/protoc-gen-crd/go.mod",
+  "go.sum":"infra/infractl/github/protoc-gen-crd/go.sum"
+}

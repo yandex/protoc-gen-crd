@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package testdata;
+
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message Spec{
+    google.protobuf.BoolValue bool1 = 1;
+    google.protobuf.FloatValue float1 = 2;
+    google.protobuf.DoubleValue double1 = 3;
+    google.protobuf.StringValue string1 = 4;
+    google.protobuf.Int32Value int321 = 5;
+    google.protobuf.UInt32Value uint321 = 6;
+    google.protobuf.Int64Value int641 = 7;
+    google.protobuf.UInt64Value uint641 = 8;
+    google.protobuf.ListValue listvalue = 9;
+}
+
+message Status{
+}
+
+message WrappersMessage {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
+

@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package testdata;
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message MyMessage0{}
