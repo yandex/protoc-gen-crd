@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package testdata;
+
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message Spec {
+    message Nested {}
+
+    message Container {
+        Nested nested = 1;
+
+        Nested nested_with_annotation = 2 [(protoc_gen_crd.k8s_patch) = {
+            merge_strategy: "replace",
+        }];
+
+        Nested nested_with_annotation2 = 3 [(protoc_gen_crd.k8s_patch) = {
+            merge_strategy: "replace",
+        }];
+    }
+
+    Container container = 1;
+
+}
+message Status {}
+
+message MessageWithPatchAnnotations {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+        field_patch_strategies: [
+            {
+                field_path: "spec.container.nested_with_annotation2",
+                k8s_patch: {
+                    merge_strategy: "drop",
+                },
+            },
+            {
+                protobuf_type: "testdata.Spec.Nested",
+                k8s_patch: {
+                    merge_strategy: "merge",
+                    merge_key: "key",
+                },
+            }
+        ],
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}

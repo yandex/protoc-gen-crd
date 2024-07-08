@@ -92,6 +92,10 @@ message K8sCRD {
     repeated PrinterColumn additional_columns = 7;
     // Object kind scope
     ScopeType scope = 8;
+    // List of fully qualified protobuf message types (including proto package name)
+    // or field names (e.g. "spec.field"), that should have custom kustomize patch strategy applied.
+    // This option overrides K8sPatch option set on the field, and field targeted rules has precedence over type targeted ones.
+    repeated K8sPatchSelector field_patch_strategies = 9;
 }
 
 message K8sPatch {
@@ -100,6 +104,18 @@ message K8sPatch {
     // Merge strategy.
     // Normally there are only two options: "merge" and "replace", with the former being default for structs and the latter default for lists.
     string merge_strategy = 2;
+}
+
+message K8sPatchSelector {
+    oneof target {
+        // Fully qualified name (with package) of protobuf type of the message to patch, e.g. "example.com.MyMessage"
+        string protobuf_type = 1;
+        // Field path of the field to patch, e.g. "spec.field"
+        string field_path = 2;
+    }
+
+    // Patch strategy to apply to the field.
+    K8sPatch k8s_patch = 3;
 }
 
 extend google.protobuf.MessageOptions {

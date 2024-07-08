@@ -87,6 +87,8 @@ type Schema struct {
 	isClientSchema bool
 
 	linterRulePattern *regexp.Regexp
+	typePatchRules    map[string]*crd.K8SPatch
+	fieldPatchRules   map[string]*crd.K8SPatch
 }
 
 func fullMessageTypeName(message protoreflect.MessageDescriptor) string {
@@ -109,13 +111,52 @@ func (s *Schema) OneCrd() bool {
 	return len(s.schemas.AdditionalProperties) == 1
 }
 
-func (s *Schema) getPatchAnnotation(message *protogen.Field) *crd.K8SPatch {
-	ext := getMessageExtension(message, crd.E_K8SPatch)
+func (s *Schema) getPatchAnnotation(field *protogen.Field, fieldPath []string) *crd.K8SPatch {
+	if fieldPath != nil {
+		// FIXME (torkve) concating each time is kinda expensive
+		fieldPathString := strings.Join(fieldPath, ".")
+		if rule, ok := s.fieldPatchRules[fieldPathString]; ok {
+			return rule
+		}
+
+	}
+
+	if field.Message != nil {
+		message := string(field.Message.Desc.FullName())
+		if rule, ok := s.typePatchRules[message]; ok {
+			return rule
+		}
+	} else if field.Enum != nil {
+		message := string(field.Enum.Desc.FullName())
+		if rule, ok := s.typePatchRules[message]; ok {
+			return rule
+		}
+	}
+
+	ext := getMessageExtension(field, crd.E_K8SPatch)
 	if ext == nil {
 		return nil
 	}
 	return ext.(*crd.K8SPatch)
 
+}
+
+func (s *Schema) buildPatchRules() {
+	typeMap := make(map[string]*crd.K8SPatch)
+	pathMap := make(map[string]*crd.K8SPatch)
+	for _, rule := range s.metadata.GetFieldPatchStrategies() {
+		switch target := rule.GetTarget().(type) {
+		case *crd.K8SPatchSelector_ProtobufType:
+			typeMap[target.ProtobufType] = rule.K8SPatch
+		case *crd.K8SPatchSelector_FieldPath:
+			pathMap[target.FieldPath] = rule.K8SPatch
+		default:
+			log.Printf("(TODO) Patch strategy has unknown target type: %T", target)
+		}
+	}
+
+	s.typePatchRules = typeMap
+	s.fieldPatchRules = pathMap
 }
 
 func (s *Schema) needAddToSchema(message *protogen.Field) bool {
@@ -177,7 +218,7 @@ func (s *Schema) schemaReferenceForTypeName(typeName string) string {
 	return "#/components/schemas/" + s.formatMessageRef(lastPart)
 }
 
-func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message, fieldPath []string) *v3.SchemaOrReference {
 	switch typeName {
 
 	// TODO (torkve) Create oneof here: we probably should allow user to provide either formatted string (RFC3339 etc)
@@ -314,15 +355,15 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 			},
 		}
 	default:
-		return s.schemaForMessage(message, false)
+		return s.schemaForMessage(message, false, fieldPath)
 	}
 }
 
-func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldPath []string) *v3.SchemaOrReference {
 	if !s.needAddToSchema(field) {
 		return nil
 	}
-	patchAnnotation := s.getPatchAnnotation(field)
+	patchAnnotation := s.getPatchAnnotation(field, fieldPath)
 
 	if field.Desc.IsMap() {
 		mapMessage := field.Message.Fields[1]
@@ -331,7 +372,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrRe
 				Schema: &v3.Schema{Type: "object",
 					AdditionalProperties: &v3.AdditionalPropertiesItem{
 						Oneof: &v3.AdditionalPropertiesItem_SchemaOrReference{
-							SchemaOrReference: s.schemaOrReferenceForField(mapMessage),
+							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, fieldPath),
 						},
 					},
 					SpecificationExtension: s.makeSpecificationExtension(patchAnnotation),
@@ -351,7 +392,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrRe
 
 	case protoreflect.MessageKind:
 		typeName := string(field.Desc.Message().FullName())
-		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message)
+		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message, fieldPath)
 		if kindSchema == nil {
 			return nil
 		}
@@ -416,6 +457,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrRe
 
 	default:
 		log.Printf("(TODO) Unsupported field type: %+v", fullMessageTypeName(field.Desc.Message()))
+		return nil
 	}
 
 	if field.Desc.IsList() {
@@ -436,7 +478,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrRe
 	return kindSchema
 }
 
-func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool) *v3.SchemaOrReference {
+func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldPath []string) *v3.SchemaOrReference {
 	typename := fullMessageTypeName(message.Desc)
 
 	if s.typesStack[typename] {
@@ -455,7 +497,7 @@ func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool) *v3.Sc
 
 	for _, field := range message.Fields {
 		// The field is either described by a reference or a schema.
-		fieldSchema := s.schemaOrReferenceForField(field)
+		fieldSchema := s.schemaOrReferenceForField(field, append(fieldPath, s.formatFieldName(field)))
 		if fieldSchema == nil {
 			continue
 		}
@@ -529,11 +571,12 @@ func (s *Schema) addSchemas(messages []*protogen.Message) {
 			continue
 		}
 		s.metadata = extension.(*crd.K8SCRD)
+		s.buildPatchRules()
 
 		s.schemas.AdditionalProperties = append(s.schemas.AdditionalProperties,
 			&v3.NamedSchemaOrReference{
 				Name:  s.formatMessageName(message),
-				Value: s.schemaForMessage(message, true),
+				Value: s.schemaForMessage(message, true, nil),
 			},
 		)
 	}

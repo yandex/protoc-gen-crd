@@ -32,7 +32,7 @@ $ go install github.com/yandex/protoc-gen-crd/cmd/protoc-gen-crd@latest
 
 Usage
 -----
- 
+
 First, you need to add protobuf file  `proto/mycrd.proto` with the CRD annotations into your project:
 
 ```protobuf
@@ -99,7 +99,41 @@ message Spec {
 }
 ```
 
-To build client version of the schema, add option `--crd_opt=client-schema=true` into your `protoc` command invokation.
+The other way to specify patch parameters is to specify them as part of protoc_gen_crd.k8s_crd option:
+
+```protobuf
+message MyCrdKind {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "my-api.my-company.org",
+        kind: "MyCrdKind",
+        /* ... */
+        field_patch_strategies: [
+            {
+                // select some single field inside the MyCrdKind message.
+                field_path: "spec.my_fields",
+                k8s_patch: {
+                    merge_key: "some_key",
+                    merge_strategy: "merge",
+                }
+            },
+            {
+                // apply patch to all fields of the specified type.
+                protobuf_type: "MyField",
+                k8s_patch: {
+                    merge_key: "some_key",
+                    merge_strategy: "merge",
+                }
+            }
+        ]
+    };
+};
+```
+
+When some patch parameters conflict, precedence is the following: field-specific patch > type-specific patch > field annotation.
+
+Second way is intended to use for external APIs that are imported into your own proto message, and cannot be modified.
+
+To build client version of the schema, add option `--crd_opt=client-schema=true` into your `protoc` command invocation.
 
 Also see full example with protobuf and Makefile in the `example/` subdirectory.
 
@@ -193,5 +227,5 @@ properties:
 Again, you are recommended to use validation webhook which would parse your object as protobuf message to check its schema.
 
 [structural schema]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#specifying-a-structural-schema
-[schema validation]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#validation 
-[combinatorial explosion]: https://en.wikipedia.org/wiki/Combinatorial_explosion 
+[schema validation]: https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#validation
+[combinatorial explosion]: https://en.wikipedia.org/wiki/Combinatorial_explosion

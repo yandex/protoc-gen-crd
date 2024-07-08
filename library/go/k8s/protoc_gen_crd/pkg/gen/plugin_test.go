@@ -213,3 +213,48 @@ func TestClientSchema(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "array", "items": map[string]interface{}{"type": "string"}}, schema.Key("f10").Value())
 	assert.Equal(t, map[string]any{"type": "object", "additionalProperties": map[string]interface{}{"type": "string"}}, schema.Key("f11").Value())
 }
+
+func TestPatchExternals(t *testing.T) {
+	response := parseProto(t, "testdata/patch_externals.proto", WithClientSchema(true))
+	if response == nil {
+		return
+	}
+	assert.Empty(t, response.Error)
+	assert.Len(t, response.File, 1)
+
+	apiSpecData := response.File[0].GetContent()
+	assert.NotEmpty(t, apiSpecData)
+
+	apiSpec := SchemaWrapper{any: map[string]any{}}
+	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
+
+	schema := apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties")
+	container := schema.Key("spec").Key("properties").Key("container").Key("properties")
+
+	assert.Equal(t,
+		map[string]any{
+			"type":                  "object",
+			"nullable":              true,
+			"additionalProperties":  false,
+			"properties":            map[string]any{},
+			patchMergeKeyField:      "key",
+			patchMergeStrategyField: "merge",
+		}, container.Key("nested").Value())
+	assert.Equal(t,
+		map[string]any{
+			"type":                  "object",
+			"nullable":              true,
+			"additionalProperties":  false,
+			"properties":            map[string]any{},
+			patchMergeKeyField:      "key",
+			patchMergeStrategyField: "merge",
+		}, container.Key("nested_with_annotation").Value())
+	assert.Equal(t,
+		map[string]any{
+			"type":                  "object",
+			"nullable":              true,
+			"additionalProperties":  false,
+			"properties":            map[string]any{},
+			patchMergeStrategyField: "drop",
+		}, container.Key("nested_with_annotation2").Value())
+}
