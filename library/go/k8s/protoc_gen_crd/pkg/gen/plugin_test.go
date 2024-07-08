@@ -127,7 +127,10 @@ func TestSimpleSpec(t *testing.T) {
 	assert.Equal(t, map[string]any{"x-kubernetes-int-or-string": true, "format": "int64"}, spec.Key("f4").Value())
 	assert.Equal(t, map[string]any{"x-kubernetes-int-or-string": true, "format": "uint64"}, spec.Key("f5").Value())
 	assert.Equal(t, map[string]any{"type": "string"}, spec.Key("f6").Key("properties").Key("f1").Value())
-	assert.Equal(t, map[string]any{"type": "object", "x-kubernetes-preserve-unknown-fields": true}, spec.Key("f6").Key("properties").Key("f2").Value())
+
+	nested := spec.Key("f6").Key("properties")
+	assert.Equal(t, map[string]any{"type": "object", "x-kubernetes-preserve-unknown-fields": true}, nested.Key("f2").Value())
+	assert.Equal(t, map[string]any{"type": "object", "nullable": true, "properties": map[string]any{}}, nested.Key("f3").Value())
 
 	assert.Equal(t, map[string]any{"x-kubernetes-preserve-unknown-fields": true}, spec.Key("f7").Value())
 }

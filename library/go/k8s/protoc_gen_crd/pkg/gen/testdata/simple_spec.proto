@@ -6,10 +6,16 @@ import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
 
 option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
 
+message Cover {
+    message Nested {}
+}
+
 message Nested {
     string f1 = 1;
 
     Nested f2 = 2;
+
+    Cover.Nested f3 = 3;
 }
 
 message Spec{

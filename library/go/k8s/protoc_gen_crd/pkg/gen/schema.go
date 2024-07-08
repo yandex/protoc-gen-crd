@@ -90,7 +90,7 @@ type Schema struct {
 }
 
 func fullMessageTypeName(message protoreflect.MessageDescriptor) string {
-	return "." + string(message.ParentFile().Package()) + "." + string(message.Name())
+	return "." + string(message.ParentFile().Package()) + "." + string(message.FullName())
 }
 
 func (s *Schema) formatFieldName(field *protogen.Field) string {
@@ -184,70 +184,70 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 	//	             or proto-compatible struct: to support direct passing objects from dctl.
 	//               But gnostic currently doesn't support Type to be an array.
 
-	case ".google.protobuf.Int32Value":
+	case "google.protobuf.Int32Value":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "integer", Format: "int32", Nullable: true}}}
-	case ".google.protobuf.UInt32Value":
+	case "google.protobuf.UInt32Value":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "integer", Format: "uint32", Nullable: true}}}
 
-	case ".google.protobuf.Int64Value":
+	case "google.protobuf.Int64Value":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Format: "int64", Nullable: true, SpecificationExtension: []*v3.NamedAny{intOrStringExtension}}}}
 
-	case ".google.protobuf.UInt64Value":
+	case "google.protobuf.UInt64Value":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Format: "uint64", Nullable: true, SpecificationExtension: []*v3.NamedAny{intOrStringExtension}}}}
 
-	case ".google.protobuf.FloatValue":
+	case "google.protobuf.FloatValue":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "number", Format: "float", Nullable: true}}}
 
-	case ".google.protobuf.DoubleValue":
+	case "google.protobuf.DoubleValue":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "number", Format: "double", Nullable: true}}}
 
-	case ".google.protobuf.StringValue":
+	case "google.protobuf.StringValue":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Nullable: true}}}
 
-	case ".google.protobuf.BoolValue":
+	case "google.protobuf.BoolValue":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "boolean", Nullable: true}}}
 
-	case ".google.protobuf.Timestamp":
+	case "google.protobuf.Timestamp":
 		// Timestamps are serialized as strings
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Format: "RFC3339"}}}
 
-	case ".google.type.Date":
+	case "google.type.Date":
 		// Dates are serialized as strings
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Format: "date"}}}
 
-	case ".google.type.DateTime":
+	case "google.type.DateTime":
 		// DateTimes are serialized as strings
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Format: "date-time"}}}
 
-	case ".google.type.Duration":
+	case "google.type.Duration":
 		// Duration are serialized as strings
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Format: "duration"}}}
 
-	case ".google.protobuf.Value":
+	case "google.protobuf.Value":
 		// Value is equivalent to a JSON value with any type
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
@@ -256,7 +256,7 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 				},
 			},
 		}
-	case ".google.protobuf.ListValue":
+	case "google.protobuf.ListValue":
 		// ListValue is equivalent to an array of Values
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
@@ -276,7 +276,7 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 				},
 			},
 		}
-	case ".google.protobuf.Struct":
+	case "google.protobuf.Struct":
 		// Struct is equivalent to a JSON object
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
@@ -287,11 +287,11 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 			},
 		}
 
-	case ".google.protobuf.Empty":
+	case "google.protobuf.Empty":
 		// Empty is close to JSON undefined than null, so ignore this field
 		return nil //&v3.SchemaOrReference{Oneof: &v3.SchemaOrReference_Schema{Schema: &v3.Schema{Type: "null"}}}
 
-	case ".google.protobuf.Any":
+	case "google.protobuf.Any":
 		return &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{
@@ -350,7 +350,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field) *v3.SchemaOrRe
 	switch kind {
 
 	case protoreflect.MessageKind:
-		typeName := fullMessageTypeName(field.Desc.Message())
+		typeName := string(field.Desc.Message().FullName())
 		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message)
 		if kindSchema == nil {
 			return nil
