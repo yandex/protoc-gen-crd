@@ -88,7 +88,7 @@ type Schema struct {
 
 	linterRulePattern *regexp.Regexp
 	typePatchRules    map[string]*crd.K8SPatch
-	fieldPatchRules   map[string]*crd.K8SPatch
+	fieldPatchRules   *RadixTree[*crd.K8SPatch]
 }
 
 func fullMessageTypeName(message protoreflect.MessageDescriptor) string {
@@ -111,14 +111,9 @@ func (s *Schema) OneCrd() bool {
 	return len(s.schemas.AdditionalProperties) == 1
 }
 
-func (s *Schema) getPatchAnnotation(field *protogen.Field, fieldPath []string) *crd.K8SPatch {
-	if fieldPath != nil {
-		// FIXME (torkve) concating each time is kinda expensive
-		fieldPathString := strings.Join(fieldPath, ".")
-		if rule, ok := s.fieldPatchRules[fieldPathString]; ok {
-			return rule
-		}
-
+func (s *Schema) getPatchAnnotation(field *protogen.Field, fieldTree *RadixTree[*crd.K8SPatch]) *crd.K8SPatch {
+	if rule, ok := fieldTree.Value(); ok {
+		return *rule
 	}
 
 	if field.Message != nil {
@@ -143,13 +138,13 @@ func (s *Schema) getPatchAnnotation(field *protogen.Field, fieldPath []string) *
 
 func (s *Schema) buildPatchRules() {
 	typeMap := make(map[string]*crd.K8SPatch)
-	pathMap := make(map[string]*crd.K8SPatch)
+	pathMap := NewRadixTree[*crd.K8SPatch]()
 	for _, rule := range s.metadata.GetFieldPatchStrategies() {
 		switch target := rule.GetTarget().(type) {
 		case *crd.K8SPatchSelector_ProtobufType:
 			typeMap[target.ProtobufType] = rule.K8SPatch
 		case *crd.K8SPatchSelector_FieldPath:
-			pathMap[target.FieldPath] = rule.K8SPatch
+			pathMap.Add(strings.Split(target.FieldPath, "."), rule.K8SPatch)
 		default:
 			log.Printf("(TODO) Patch strategy has unknown target type: %T", target)
 		}
@@ -218,7 +213,7 @@ func (s *Schema) schemaReferenceForTypeName(typeName string) string {
 	return "#/components/schemas/" + s.formatMessageRef(lastPart)
 }
 
-func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message, fieldPath []string) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
 	switch typeName {
 
 	// TODO (torkve) Create oneof here: we probably should allow user to provide either formatted string (RFC3339 etc)
@@ -355,15 +350,15 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 			},
 		}
 	default:
-		return s.schemaForMessage(message, false, fieldPath)
+		return s.schemaForMessage(message, false, fieldTree)
 	}
 }
 
-func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldPath []string) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
 	if !s.needAddToSchema(field) {
 		return nil
 	}
-	patchAnnotation := s.getPatchAnnotation(field, fieldPath)
+	patchAnnotation := s.getPatchAnnotation(field, fieldTree)
 
 	if field.Desc.IsMap() {
 		mapMessage := field.Message.Fields[1]
@@ -372,7 +367,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldPath []st
 				Schema: &v3.Schema{Type: "object",
 					AdditionalProperties: &v3.AdditionalPropertiesItem{
 						Oneof: &v3.AdditionalPropertiesItem_SchemaOrReference{
-							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, fieldPath),
+							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, fieldTree),
 						},
 					},
 					SpecificationExtension: s.makeSpecificationExtension(patchAnnotation),
@@ -392,7 +387,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldPath []st
 
 	case protoreflect.MessageKind:
 		typeName := string(field.Desc.Message().FullName())
-		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message, fieldPath)
+		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message, fieldTree)
 		if kindSchema == nil {
 			return nil
 		}
@@ -478,7 +473,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldPath []st
 	return kindSchema
 }
 
-func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldPath []string) *v3.SchemaOrReference {
+func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
 	typename := fullMessageTypeName(message.Desc)
 
 	if s.typesStack[typename] {
@@ -497,7 +492,7 @@ func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldP
 
 	for _, field := range message.Fields {
 		// The field is either described by a reference or a schema.
-		fieldSchema := s.schemaOrReferenceForField(field, append(fieldPath, s.formatFieldName(field)))
+		fieldSchema := s.schemaOrReferenceForField(field, fieldTree.Child(s.formatFieldName(field)))
 		if fieldSchema == nil {
 			continue
 		}
@@ -576,7 +571,7 @@ func (s *Schema) addSchemas(messages []*protogen.Message) {
 		s.schemas.AdditionalProperties = append(s.schemas.AdditionalProperties,
 			&v3.NamedSchemaOrReference{
 				Name:  s.formatMessageName(message),
-				Value: s.schemaForMessage(message, true, nil),
+				Value: s.schemaForMessage(message, true, s.fieldPatchRules),
 			},
 		)
 	}
