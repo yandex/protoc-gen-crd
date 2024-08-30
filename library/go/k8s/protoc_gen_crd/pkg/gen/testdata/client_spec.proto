@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package testdata;
+
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message Spec {
+    reserved "f3";
+
+    string f1 = 1;
+    string f2 = 2 [(protoc_gen_crd.schema) = SS_CLIENT];
+}
+
+message ClientSpec {
+    string f1 = 1;
+}
+
+enum ClientEnum {
+    F1 = 0;
+    F2 = 1;
+}
+
+message MyMessage4 {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+    };
+
+    Spec spec = 1;
+
+    string f2 = 2 [(protoc_gen_crd.schema) = SS_CLIENT];
+    int32 f3 = 3 [(protoc_gen_crd.schema) = SS_CLIENT];
+    int64 f4 = 4 [(protoc_gen_crd.schema) = SS_CLIENT];
+    uint32 f5 = 5 [(protoc_gen_crd.schema) = SS_CLIENT];
+    ClientSpec f6 = 6 [(protoc_gen_crd.schema) = SS_CLIENT];
+    ClientEnum f7 = 7 [(protoc_gen_crd.schema) = SS_CLIENT];
+    oneof clientOneOf {
+        string f8 = 8 [(protoc_gen_crd.schema) = SS_CLIENT];
+        string f9 = 9 [(protoc_gen_crd.schema) = SS_CLIENT];
+    }
+    repeated string f10 = 10 [(protoc_gen_crd.schema) = SS_CLIENT];
+    map<string, string> f11 = 11 [(protoc_gen_crd.schema) = SS_CLIENT];
+}
+

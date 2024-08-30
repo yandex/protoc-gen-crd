@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package testdata;
+
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message Spec{}
+message Status{}
+
+message MyMessage1 {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group1",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
+
+message MyMessage2 {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group2",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
