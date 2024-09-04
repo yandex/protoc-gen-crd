@@ -324,8 +324,16 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 		}
 
 	case "google.protobuf.Empty":
-		// Empty is close to JSON undefined than null, so ignore this field
-		return nil //&v3.SchemaOrReference{Oneof: &v3.SchemaOrReference_Schema{Schema: &v3.Schema{Type: "null"}}}
+		// Empty is equivalent to object without any properties.
+		return &v3.SchemaOrReference{
+			Oneof: &v3.SchemaOrReference_Schema{
+				Schema: &v3.Schema{
+					Type:       "object",
+					Nullable:   true,
+					Properties: &v3.Properties{},
+				},
+			},
+		}
 
 	case "google.protobuf.Any":
 		return &v3.SchemaOrReference{

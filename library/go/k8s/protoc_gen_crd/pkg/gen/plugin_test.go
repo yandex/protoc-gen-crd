@@ -258,3 +258,20 @@ func TestPatchExternals(t *testing.T) {
 			patchMergeStrategyField: "drop",
 		}, container.Key("nested_with_annotation2").Value())
 }
+
+func TestWellKnown(t *testing.T) {
+	response := parseProto(t, "testdata/well_known.proto")
+	if response == nil {
+		return
+	}
+	assert.Empty(t, response.Error)
+	assert.Len(t, response.File, 1)
+
+	apiSpecData := response.File[0].GetContent()
+	assert.NotEmpty(t, apiSpecData)
+
+	apiSpec := SchemaWrapper{any: map[string]any{}}
+	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
+	spec := apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties").Key("spec").Key("properties")
+	assert.Equal(t, map[string]any{"type": "object", "nullable": true, "properties": map[string]any{}}, spec.Key("empty_value").Value())
+}

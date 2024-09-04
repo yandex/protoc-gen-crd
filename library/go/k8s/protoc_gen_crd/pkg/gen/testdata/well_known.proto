@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package testdata;
+
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message Spec {
+    google.protobuf.Empty empty_value = 1;
+}
+
+message Status {
+}
+
+message WellKnownMessage {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group",
+        kind: "Kind",
+        plural: "kinds",
+        singular: "kind",
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
+
