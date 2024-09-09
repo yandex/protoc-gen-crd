@@ -53,7 +53,7 @@ func parseProto(t *testing.T, path string, opts ...PluginOption) *pluginpb.CodeG
 		InferImportPaths:      false,
 	}
 	fds, err := parser.ParseFiles(path)
-	if !assert.NoError(t, err) {
+	if err != nil {
 		return nil
 	}
 
@@ -73,7 +73,7 @@ func parseProto(t *testing.T, path string, opts ...PluginOption) *pluginpb.CodeG
 	}
 
 	err = p.Run(plugin)
-	if !assert.NoError(t, err) {
+	if err != nil {
 		return nil
 	}
 
@@ -212,6 +212,35 @@ func TestClientSchema(t *testing.T) {
 	assert.Equal(t, map[string]any{"type": "string", "nullable": true}, schema.Key("f9").Value())
 	assert.Equal(t, map[string]any{"type": "array", "items": map[string]interface{}{"type": "string"}}, schema.Key("f10").Value())
 	assert.Equal(t, map[string]any{"type": "object", "additionalProperties": map[string]interface{}{"type": "string"}}, schema.Key("f11").Value())
+}
+
+func TestSchemaless(t *testing.T) {
+	response := parseProto(t, "testdata/client_spec.proto", WithSchemalessCrd(true))
+	if response == nil {
+		return
+	}
+	assert.Empty(t, response.Error)
+	assert.Len(t, response.File, 1)
+
+	apiSpecData := response.File[0].GetContent()
+	assert.NotEmpty(t, apiSpecData)
+
+	apiSpec := SchemaWrapper{any: map[string]any{}}
+	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
+
+	schema := apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties")
+	assert.Equal(t, map[string]any{
+		"spec": map[string]any{
+			"x-kubernetes-preserve-unknown-fields": true,
+			"type":                                 "object",
+		},
+		"status": map[string]any{
+			"x-kubernetes-preserve-unknown-fields": true,
+			"type":                                 "object",
+		},
+	}, schema.Value())
+
+	assert.Nil(t, parseProto(t, "testdata/client_spec.proto", WithSchemalessCrd(true), WithClientSchema(true)))
 }
 
 func TestPatchExternals(t *testing.T) {

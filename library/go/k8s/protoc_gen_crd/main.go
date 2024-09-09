@@ -12,10 +12,11 @@ var flags flag.FlagSet
 
 func main() {
 	isClientSchema := flags.Bool("client-schema", false, "")
+	isSchemalessCrd := flags.Bool("schemaless", false, "")
 	opts := protogen.Options{
 		ParamFunc: flags.Set,
 	}
 
-	plugin := gen.Plugin{IsClientSchema: isClientSchema}
+	plugin := gen.Plugin{IsClientSchema: isClientSchema, IsSchemaless: isSchemalessCrd}
 	opts.Run(plugin.Run)
 }

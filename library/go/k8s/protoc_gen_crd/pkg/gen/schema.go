@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/gnostic/compiler"
@@ -23,6 +24,8 @@ const (
 	intOrStringField           = "x-kubernetes-int-or-string"
 	preserveUnknownFieldsField = "x-kubernetes-preserve-unknown-fields"
 )
+
+var requiredRootSchemalessFields = []string{"spec", "status"}
 
 var (
 	columnTypeName = map[crd.ColumnType]string{
@@ -85,6 +88,7 @@ type Schema struct {
 	schemas        *v3.SchemasOrReferences
 	metadata       *crd.K8SCRD
 	isClientSchema bool
+	isSchemaless   bool
 
 	linterRulePattern *regexp.Regexp
 	typePatchRules    map[string]*crd.K8SPatch
@@ -362,12 +366,18 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 	}
 }
 
-func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForField(field *protogen.Field, isRootField bool, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
 	if !s.needAddToSchema(field) {
 		return nil
 	}
+	// for schemaless, ignore all fields except spec and status
+	if s.isSchemaless {
+		if isRootField && slices.Contains(requiredRootSchemalessFields, string(field.Desc.Name())) {
+			return opaqueSchema
+		}
+		return nil
+	}
 	patchAnnotation := s.getPatchAnnotation(field, fieldTree)
-
 	if field.Desc.IsMap() {
 		mapMessage := field.Message.Fields[1]
 		return &v3.SchemaOrReference{
@@ -375,7 +385,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, fieldTree *Rad
 				Schema: &v3.Schema{Type: "object",
 					AdditionalProperties: &v3.AdditionalPropertiesItem{
 						Oneof: &v3.AdditionalPropertiesItem_SchemaOrReference{
-							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, fieldTree),
+							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, false, fieldTree),
 						},
 					},
 					SpecificationExtension: s.makeSpecificationExtension(patchAnnotation),
@@ -500,7 +510,7 @@ func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldT
 
 	for _, field := range message.Fields {
 		// The field is either described by a reference or a schema.
-		fieldSchema := s.schemaOrReferenceForField(field, fieldTree.Child(s.formatFieldName(field)))
+		fieldSchema := s.schemaOrReferenceForField(field, isRoot, fieldTree.Child(s.formatFieldName(field)))
 		if fieldSchema == nil {
 			continue
 		}

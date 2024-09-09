@@ -22,6 +22,10 @@ enum ClientEnum {
     F2 = 1;
 }
 
+message Status {
+    string data = 1;
+}
+
 message MyMessage4 {
     option (protoc_gen_crd.k8s_crd) = {
         api_group: "group",
@@ -44,5 +48,7 @@ message MyMessage4 {
     }
     repeated string f10 = 10 [(protoc_gen_crd.schema) = SS_CLIENT];
     map<string, string> f11 = 11 [(protoc_gen_crd.schema) = SS_CLIENT];
+
+    Status status = 12;
 }
 

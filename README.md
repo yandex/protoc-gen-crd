@@ -149,6 +149,13 @@ Key differces between modes:
    with known protobuf version.
 2. Client mode allows to mark some fields as client-only, so that they would be processed on the client, but should not exist on server.
 
+Schemaless CRD
+------------------------
+
+If you need to validate a custom resource with your own tools, you can replace CRD schema on the server by opaque object. In this case, K8S will save all unknown fields inside "spec" and "status", but will still validate common fields required for correct k8s operations (metadata, kind, apiVersion).
+
+To generate such a scheme, add the option `--crd_opt=schemaless=true`
+
 Known caveats
 -------------
 
