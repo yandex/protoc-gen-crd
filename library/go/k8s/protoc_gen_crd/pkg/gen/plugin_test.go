@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/jhump/protoreflect/desc"
@@ -303,4 +304,19 @@ func TestWellKnown(t *testing.T) {
 	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
 	spec := apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties").Key("spec").Key("properties")
 	assert.Equal(t, map[string]any{"type": "object", "nullable": true, "properties": map[string]any{}}, spec.Key("empty_value").Value())
+}
+
+func TestYamlSpecialNames(t *testing.T) {
+	response := parseProto(t, "testdata/yaml_conversions.proto")
+	assert.Empty(t, response.Error)
+	assert.Len(t, response.File, 1)
+
+	apiSpecData := response.File[0].GetContent()
+	assert.NotEmpty(t, apiSpecData)
+
+	// NOTE (torkve) we cannot use yaml.v3 to test unmarshalling (it does it correct), and we do not want to depend on yaml.v2, so let's just regexp it.
+	yamlUnquoted := regexp.MustCompile(`\n\s+y:\n\s+type: string\n`)
+	yamlQuoted := regexp.MustCompile(`\n\s+"y":\n\s+type: string\n`)
+	assert.Nil(t, yamlUnquoted.FindStringIndex(apiSpecData), apiSpecData)
+	assert.NotNil(t, yamlQuoted.FindStringIndex(apiSpecData), apiSpecData)
 }
