@@ -1,3 +1,4 @@
 {
-  "project":"protoc-gen-crd"
+  "project":"protoc-gen-crd",
+  "repository":"arcadia"
 }
