@@ -137,6 +137,12 @@ To build client version of the schema, add option `--crd_opt=client-schema=true`
 
 Also see full example with protobuf and Makefile in the `example/` subdirectory.
 
+Strict schema
+------------------------
+
+By default CRDs are permissive and allow unknown object fields (`additionalProperties: true` in json schema)
+to enable protobuf compatibility with future schema versions. You can change this behavior with `--crd_opt=strict-schema=true` option.
+
 Client schema and fields
 ------------------------
 
@@ -144,9 +150,7 @@ By default CRDs are compiled in server mode, but you can enable client mode with
 
 Key differces between modes:
 
-1. Server mode is permissive and allows unknown object fields (`additionalProperties: true` in json schema)
-   to enable protobuf compatibility with future schema versions. Client mode is strict because client always operates
-   with known protobuf version.
+1. Strict schema is enabled because client always operates with known protobuf version.
 2. Client mode allows to mark some fields as client-only, so that they would be processed on the client, but should not exist on server.
 
 Schemaless CRD

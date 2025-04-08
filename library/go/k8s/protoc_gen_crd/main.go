@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"strconv"
 
 	"google.golang.org/protobuf/compiler/protogen"
 
@@ -10,13 +11,26 @@ import (
 
 var flags flag.FlagSet
 
+func setBoolVar(dst **bool) func(val string) error {
+	return func(s string) error {
+		val, err := strconv.ParseBool(s)
+		if err != nil {
+			return err
+		}
+		*dst = &val
+		return nil
+	}
+}
+
 func main() {
-	isClientSchema := flags.Bool("client-schema", false, "")
-	isSchemalessCrd := flags.Bool("schemaless", false, "")
+	plugin := gen.Plugin{}
+
+	flags.BoolFunc("client-schema", "", setBoolVar(&plugin.IsClientSchema))
+	flags.BoolFunc("schemaless", "", setBoolVar(&plugin.IsSchemaless))
+	flags.BoolFunc("strict-schema", "", setBoolVar(&plugin.IsStrictSchema))
 	opts := protogen.Options{
 		ParamFunc: flags.Set,
 	}
 
-	plugin := gen.Plugin{IsClientSchema: isClientSchema, IsSchemaless: isSchemalessCrd}
 	opts.Run(plugin.Run)
 }

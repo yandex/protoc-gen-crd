@@ -89,6 +89,7 @@ type Schema struct {
 	metadata       *crd.K8SCRD
 	isClientSchema bool
 	isSchemaless   bool
+	isStrictSchema bool
 
 	linterRulePattern *regexp.Regexp
 	typePatchRules    map[string]*crd.K8SPatch
@@ -547,7 +548,7 @@ func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldT
 	}
 
 	var additionalProperties *v3.AdditionalPropertiesItem
-	if s.isClientSchema && !isRoot {
+	if s.isStrictSchema && !isRoot {
 		additionalProperties = &v3.AdditionalPropertiesItem{
 			Oneof: &v3.AdditionalPropertiesItem_Boolean{
 				Boolean: false,

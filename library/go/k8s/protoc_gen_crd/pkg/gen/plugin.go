@@ -26,6 +26,11 @@ type Plugin struct {
 	// If IsSchemaless set to true, then spec will be generated only with two fields: "spec", "status"
 	// Сontent of each of these fields will contain only the annotation "x-kubernetes-preserve-unknown-fields" and type: object
 	IsSchemaless *bool
+
+	// IsStrictSchema controls output mode.
+	// If IsStrictSchema set to true, then spec will be generated with strict schema ("x-kubernetes-preserve-unknown-fields": true).
+	// By default, equals to IsClientSchema.
+	IsStrictSchema *bool
 }
 
 type PluginOption func(p *Plugin)
@@ -39,6 +44,12 @@ func WithClientSchema(isClientSchema bool) PluginOption {
 func WithSchemalessCrd(isSchemalessCrd bool) PluginOption {
 	return func(p *Plugin) {
 		p.IsSchemaless = &isSchemalessCrd
+	}
+}
+
+func WithScrictSchema(isStrictSchema bool) PluginOption {
+	return func(p *Plugin) {
+		p.IsStrictSchema = &isStrictSchema
 	}
 }
 
@@ -68,9 +79,16 @@ func fixYamlNodeRecursively(node *yaml.Node) {
 	}
 }
 
-func (p Plugin) Run(plugin *protogen.Plugin) error {
+func (p *Plugin) Run(plugin *protogen.Plugin) error {
 	isClientSchema := p.IsClientSchema != nil && *p.IsClientSchema
 	isSchemalessCrd := p.IsSchemaless != nil && *p.IsSchemaless
+	isStrictSchema := isClientSchema
+	if p.IsStrictSchema != nil {
+		isStrictSchema = *p.IsStrictSchema
+	}
+	if isStrictSchema && isSchemalessCrd {
+		return fmt.Errorf(`cannot set both "strict-schema" and "schemaless" options`)
+	}
 	if isClientSchema && isSchemalessCrd {
 		return fmt.Errorf(`cannot set both "client-schema" and "schemaless" options`)
 	}
@@ -84,6 +102,7 @@ func (p Plugin) Run(plugin *protogen.Plugin) error {
 			linterRulePattern: regexp.MustCompile(`\(-- .* --\)`),
 			isClientSchema:    isClientSchema,
 			isSchemaless:      isSchemalessCrd,
+			isStrictSchema:    isStrictSchema,
 		}
 		schema.addSchemas(file.Messages)
 
@@ -205,6 +224,8 @@ func (p Plugin) Run(plugin *protogen.Plugin) error {
 			suffix = ".kustomize.yaml"
 		case schema.isSchemaless:
 			suffix = ".schemaless.yaml"
+		case schema.isStrictSchema:
+			suffix = ".strict.yaml"
 		default:
 			suffix = ".crd.yaml"
 		}

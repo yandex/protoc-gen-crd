@@ -136,6 +136,40 @@ func TestSimpleSpec(t *testing.T) {
 	assert.Equal(t, map[string]any{"x-kubernetes-preserve-unknown-fields": true}, spec.Key("f7").Value())
 }
 
+func TestStrictsSchema(t *testing.T) {
+	response := parseProto(t, "testdata/simple_spec.proto", WithScrictSchema(true))
+	if response == nil {
+		return
+	}
+	assert.Empty(t, response.Error)
+	assert.Len(t, response.File, 1)
+
+	apiSpecData := response.File[0].GetContent()
+	assert.NotEmpty(t, apiSpecData)
+	apiSpec := SchemaWrapper{any: map[string]any{}}
+	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
+	versions := apiSpec.Key("spec").Key("versions")
+	assert.Len(t, versions.Value(), 1)
+	schema := versions.Index(0).Key("schema").Key("openAPIV3Schema").Key("properties")
+	assert.Contains(t, schema.Value(), "spec")
+	assert.Contains(t, schema.Value(), "status")
+
+	spec := schema.Key("spec").Key("properties")
+	assert.Equal(t, false, schema.Key("spec").Key("additionalProperties").Value())
+	assert.Equal(t, map[string]any{"type": "string"}, spec.Key("f1").Value())
+	assert.Equal(t, map[string]any{"type": "integer", "format": "int32"}, spec.Key("f2").Value())
+	assert.Equal(t, map[string]any{"type": "integer", "format": "uint32"}, spec.Key("f3").Value())
+	assert.Equal(t, map[string]any{"x-kubernetes-int-or-string": true, "format": "int64"}, spec.Key("f4").Value())
+	assert.Equal(t, map[string]any{"x-kubernetes-int-or-string": true, "format": "uint64"}, spec.Key("f5").Value())
+	assert.Equal(t, map[string]any{"type": "string"}, spec.Key("f6").Key("properties").Key("f1").Value())
+
+	nested := spec.Key("f6").Key("properties")
+	assert.Equal(t, map[string]any{"type": "object", "x-kubernetes-preserve-unknown-fields": true}, nested.Key("f2").Value())
+	assert.Equal(t, map[string]any{"additionalProperties": false, "type": "object", "nullable": true, "properties": map[string]any{}}, nested.Key("f3").Value())
+
+	assert.Equal(t, map[string]any{"x-kubernetes-preserve-unknown-fields": true}, spec.Key("f7").Value())
+}
+
 func TestWrappers(t *testing.T) {
 	response := parseProto(t, "testdata/wrappers_spec.proto")
 	if response == nil {
