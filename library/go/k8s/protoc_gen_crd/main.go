@@ -28,6 +28,7 @@ func main() {
 	flags.BoolFunc("client-schema", "", setBoolVar(&plugin.IsClientSchema))
 	flags.BoolFunc("schemaless", "", setBoolVar(&plugin.IsSchemaless))
 	flags.BoolFunc("strict-schema", "", setBoolVar(&plugin.IsStrictSchema))
+	flags.BoolFunc("generate-merge-keys", "", setBoolVar(&plugin.IsGeneratingMergeKeysEnabled))
 	opts := protogen.Options{
 		ParamFunc: flags.Set,
 	}

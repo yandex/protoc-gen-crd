@@ -31,6 +31,12 @@ type Plugin struct {
 	// If IsStrictSchema set to true, then spec will be generated with strict schema ("x-kubernetes-preserve-unknown-fields": true).
 	// By default, equals to IsClientSchema.
 	IsStrictSchema *bool
+
+	// IsGeneratingMergeKeysEnabled controls inserting fake merge keys.
+	// If IsGeneratingMergeKeysEnabled set to true, then plugin will insert fake merge keys
+	// to kustomize merge annotations set if policy is merge, but merge key is not set.
+	// This behavior emulates append.
+	IsGeneratingMergeKeysEnabled *bool
 }
 
 type PluginOption func(p *Plugin)
@@ -50,6 +56,12 @@ func WithSchemalessCrd(isSchemalessCrd bool) PluginOption {
 func WithScrictSchema(isStrictSchema bool) PluginOption {
 	return func(p *Plugin) {
 		p.IsStrictSchema = &isStrictSchema
+	}
+}
+
+func WithGeneratingMergeKeys(isGeneratingMergeKeysEnabled bool) PluginOption {
+	return func(p *Plugin) {
+		p.IsGeneratingMergeKeysEnabled = &isGeneratingMergeKeysEnabled
 	}
 }
 
@@ -86,23 +98,28 @@ func (p *Plugin) Run(plugin *protogen.Plugin) error {
 	if p.IsStrictSchema != nil {
 		isStrictSchema = *p.IsStrictSchema
 	}
+	isGeneratingMergeKeysEnabled := p.IsGeneratingMergeKeysEnabled != nil && *p.IsGeneratingMergeKeysEnabled
 	if isStrictSchema && isSchemalessCrd {
 		return fmt.Errorf(`cannot set both "strict-schema" and "schemaless" options`)
 	}
 	if isClientSchema && isSchemalessCrd {
 		return fmt.Errorf(`cannot set both "client-schema" and "schemaless" options`)
 	}
+	if isGeneratingMergeKeysEnabled && !isClientSchema {
+		return fmt.Errorf(`generating merge keys only works with "client-schema"`)
+	}
 
 	plugin.SupportedFeatures |= uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 	for _, file := range plugin.Files {
 		schema := &Schema{
-			visitedSchemas:    make(map[string]struct{}),
-			typesStack:        map[string]bool{},
-			schemas:           &v3.SchemasOrReferences{AdditionalProperties: make([]*v3.NamedSchemaOrReference, 0)},
-			linterRulePattern: regexp.MustCompile(`\(-- .* --\)`),
-			isClientSchema:    isClientSchema,
-			isSchemaless:      isSchemalessCrd,
-			isStrictSchema:    isStrictSchema,
+			visitedSchemas:               make(map[string]struct{}),
+			typesStack:                   map[string]bool{},
+			schemas:                      &v3.SchemasOrReferences{AdditionalProperties: make([]*v3.NamedSchemaOrReference, 0)},
+			linterRulePattern:            regexp.MustCompile(`\(-- .* --\)`),
+			isClientSchema:               isClientSchema,
+			isSchemaless:                 isSchemalessCrd,
+			isStrictSchema:               isStrictSchema,
+			isGeneratingMergeKeysEnabled: isGeneratingMergeKeysEnabled,
 		}
 		schema.addSchemas(file.Messages)
 

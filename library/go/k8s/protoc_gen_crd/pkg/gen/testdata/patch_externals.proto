@@ -19,6 +19,8 @@ message Spec {
         Nested nested_with_annotation2 = 3 [(protoc_gen_crd.k8s_patch) = {
             merge_strategy: "replace",
         }];
+
+        repeated Nested nested_without_merge_key = 4;
     }
 
     Container container = 1;
@@ -44,6 +46,12 @@ message MessageWithPatchAnnotations {
                 k8s_patch: {
                     merge_strategy: "merge",
                     merge_key: "key",
+                },
+            },
+            {
+                field_path: "spec.container.nested_without_merge_key",
+                k8s_patch: {
+                    merge_strategy: "merge",
                 },
             }
         ],

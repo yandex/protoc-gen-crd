@@ -153,6 +153,9 @@ Key differces between modes:
 1. Strict schema is enabled because client always operates with known protobuf version.
 2. Client mode allows to mark some fields as client-only, so that they would be processed on the client, but should not exist on server.
 
+> [!TIP]
+> Unfortunately, kustomize can't merge fields without explicitly specified merge keys. If you can't or don't want to create merge keys manually, `protoc-gen-crd` can add fake merge key to your client schema. To enable add the option `--crd_opt=generate-merge-keys=true`. You still need to fill these keys by yourself.
+
 Schemaless CRD
 ------------------------
 

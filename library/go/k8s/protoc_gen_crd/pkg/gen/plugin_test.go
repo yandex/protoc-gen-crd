@@ -279,7 +279,7 @@ func TestSchemaless(t *testing.T) {
 }
 
 func TestPatchExternals(t *testing.T) {
-	response := parseProto(t, "testdata/patch_externals.proto", WithClientSchema(true))
+	response := parseProto(t, "testdata/patch_externals.proto", WithClientSchema(true), WithGeneratingMergeKeys(true))
 	if response == nil {
 		return
 	}
@@ -321,6 +321,22 @@ func TestPatchExternals(t *testing.T) {
 			"properties":            map[string]any{},
 			patchMergeStrategyField: "drop",
 		}, container.Key("nested_with_annotation2").Value())
+	assert.Equal(t, map[string]any{
+		"type": "array",
+		"items": map[string]any{
+			"type":                 "object",
+			"nullable":             true,
+			"additionalProperties": false,
+			"properties": map[string]any{
+				fakeMergeKey: map[string]any{
+					"description": fakeMergeKeyDescription,
+					"type":        "string",
+				},
+			},
+		},
+		patchMergeKeyField:      fakeMergeKey,
+		patchMergeStrategyField: "merge",
+	}, container.Key("nested_without_merge_key").Value())
 }
 
 func TestWellKnown(t *testing.T) {
