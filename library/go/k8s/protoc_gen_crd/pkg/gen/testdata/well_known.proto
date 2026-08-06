@@ -3,12 +3,14 @@ syntax = "proto3";
 package testdata;
 
 import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/empty.proto";
 
 option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
 
 message Spec {
     google.protobuf.Empty empty_value = 1;
+    google.protobuf.Duration duration = 2;
 }
 
 message Status {
@@ -25,4 +27,3 @@ message WellKnownMessage {
     Spec spec = 1;
     Status status = 2;
 }
-

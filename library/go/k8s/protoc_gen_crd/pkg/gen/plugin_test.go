@@ -354,6 +354,7 @@ func TestWellKnown(t *testing.T) {
 	assert.NoError(t, yaml.Unmarshal([]byte(apiSpecData), &apiSpec.any))
 	spec := apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties").Key("spec").Key("properties")
 	assert.Equal(t, map[string]any{"type": "object", "nullable": true, "properties": map[string]any{}}, spec.Key("empty_value").Value())
+	assert.Equal(t, map[string]any{"type": "string"}, spec.Key("duration").Value())
 }
 
 func TestYamlSpecialNames(t *testing.T) {

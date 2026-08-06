@@ -324,6 +324,12 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "string", Format: "RFC3339"}}}
 
+	case "google.protobuf.Duration":
+		// Durations are serialized as strings
+		return &v3.SchemaOrReference{
+			Oneof: &v3.SchemaOrReference_Schema{
+				Schema: &v3.Schema{Type: "string"}}}
+
 	case "google.type.Date":
 		// Dates are serialized as strings
 		return &v3.SchemaOrReference{
