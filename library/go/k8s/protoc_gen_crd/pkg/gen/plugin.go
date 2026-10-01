@@ -1,6 +1,7 @@
 package gen
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 
@@ -122,6 +123,9 @@ func (p *Plugin) Run(plugin *protogen.Plugin) error {
 			isGeneratingMergeKeysEnabled: isGeneratingMergeKeysEnabled,
 		}
 		schema.addSchemas(file.Messages)
+		if err := errors.Join(schema.errs...); err != nil {
+			return fmt.Errorf("%s: %w", file.Desc.Path(), err)
+		}
 
 		if !schema.OneCrd() {
 			continue

@@ -163,6 +163,58 @@ If you need to validate a custom resource with your own tools, you can replace C
 
 To generate such a scheme, add the option `--crd_opt=schemaless=true`
 
+With an opaque schema the API server tracks ownership of every nested field of "spec" and "status",
+so `metadata.managedFields` grows with the size of the object. The schemaless CRD keeps the field topology
+(see below) of the "spec" and "status" fields themselves, so `KT_ATOMIC` on them makes the API server track each
+as a single field. Topology of nested fields does not apply to it.
+
+Field topology
+------------------------
+
+The `k8s_topology` field option sets how the API server tracks ownership of the field in `metadata.managedFields`
+and merges it on server-side apply. The generated marker depends on how the field is rendered:
+
+| Value | Object or map field | List field |
+|---|---|---|
+| `KT_ATOMIC` | `x-kubernetes-map-type: atomic` | `x-kubernetes-list-type: atomic` |
+| `KT_GRANULAR` | `x-kubernetes-map-type: granular` | error |
+| `KT_SET` | error | `x-kubernetes-list-type: set`, scalar items only |
+| `KT_MAP` | error | `x-kubernetes-list-type: map`, object items only |
+
+`KT_MAP` uses the `merge_key` of the field's `k8s_patch` as the list key and marks it required; the key must be
+a non-optional scalar field of the items. Scalar fields accept no topology. Invalid combinations fail generation.
+
+```protobuf
+message Spec {
+    repeated MyField my_fields = 1 [
+        (protoc_gen_crd.k8s_topology) = KT_MAP,
+        (protoc_gen_crd.k8s_patch) = {merge_key: "name", merge_strategy: "merge"}
+    ];
+}
+```
+
+For fields of types you cannot annotate, use `field_topologies` selectors in the `protoc_gen_crd.k8s_crd` option,
+by field path or by protobuf type, with the same precedence as for patch parameters:
+field-specific rule > type-specific rule > field annotation. A type rule matches a repeated field as a whole list,
+and the values of a map field.
+
+```protobuf
+message MyCrdKind {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "my-api.my-company.org",
+        kind: "MyCrdKind",
+        /* ... */
+        field_topologies: [{field_path: "status", topology: KT_ATOMIC}],
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
+```
+
+An atomic field is owned and replaced as a whole by server-side apply: an applier that sets it takes ownership
+of the entire field and conflicts with any other manager of it. Plain updates are not affected.
+
 Known caveats
 -------------
 

@@ -52,6 +52,23 @@ enum SchemaSide {
     SS_CLIENT = 1;
 }
 
+// Server-side apply topology of a field: how the API server tracks its ownership in managedFields
+// and merges it on apply. The generated marker depends on the rendered schema type of the field.
+enum K8sTopology {
+    // Kubernetes default: objects and maps are granular, lists are atomic.
+    KT_DEFAULT = 0;
+    // The field is owned and replaced as a whole:
+    // `x-kubernetes-map-type: atomic` for objects and maps, `x-kubernetes-list-type: atomic` for lists.
+    KT_ATOMIC = 1;
+    // Every nested field is owned separately: `x-kubernetes-map-type: granular`. Objects and maps only.
+    KT_GRANULAR = 2;
+    // List items are unique scalars owned separately: `x-kubernetes-list-type: set`. Lists of scalars only.
+    KT_SET = 3;
+    // List items are objects owned separately by their key: `x-kubernetes-list-type: map`.
+    // Lists of objects only; the key is the `merge_key` of the field's K8sPatch and is marked required.
+    KT_MAP = 4;
+}
+
 message PrinterColumn {
     // Human readable name of the column
     string name = 1;
@@ -96,6 +113,10 @@ message K8sCRD {
     // or field names (e.g. "spec.field"), that should have custom kustomize patch strategy applied.
     // This option overrides K8sPatch option set on the field, and field targeted rules has precedence over type targeted ones.
     repeated K8sPatchSelector field_patch_strategies = 9;
+    // List of fully qualified protobuf message types (including proto package name)
+    // or field names (e.g. "status"), that should have the given server-side apply topology.
+    // This option overrides K8sTopology option set on the field, and field targeted rules has precedence over type targeted ones.
+    repeated K8sTopologySelector field_topologies = 10;
 }
 
 message K8sPatch {
@@ -118,6 +139,18 @@ message K8sPatchSelector {
     K8sPatch k8s_patch = 3;
 }
 
+message K8sTopologySelector {
+    oneof target {
+        // Fully qualified name (with package) of protobuf type of the fields to mark, e.g. "example.com.MyMessage"
+        string protobuf_type = 1;
+        // Field path of the field to mark, e.g. "status"
+        string field_path = 2;
+    }
+
+    // Server-side apply topology of the field.
+    K8sTopology topology = 3;
+}
+
 extend google.protobuf.MessageOptions {
     // This option is added to a message in proto file, to create CRD from this file.
     // Message type must contain "spec" and "status" fields to conform to k8s CRD rules.
@@ -132,4 +165,6 @@ extend google.protobuf.FieldOptions {
     K8sPatch k8s_patch = 73394822;
     //  Add this option to a field to specify in which CRD mode field should be present. By default all fields are generated both for server and client schemas
     SchemaSide schema  = 73394823;
+    // Add this option to a field to specify how the API server tracks its ownership and merges it on server-side apply.
+    K8sTopology k8s_topology = 73394824;
 }

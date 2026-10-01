@@ -30,6 +30,14 @@ func (t *RadixTree[T]) Child(item string) *RadixTree[T] {
 	return t.children[item]
 }
 
+// Children returns a tree with the same children and no value of its own.
+func (t *RadixTree[T]) Children() *RadixTree[T] {
+	if t == nil {
+		return nil
+	}
+	return &RadixTree[T]{children: t.children}
+}
+
 func (t *RadixTree[T]) Value() (*T, bool) {
 	if t == nil {
 		return nil, false

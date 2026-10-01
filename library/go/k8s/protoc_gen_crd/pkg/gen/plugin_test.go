@@ -1,12 +1,16 @@
 package gen
 
 import (
+	"io"
+	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/desc/protoparse"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
@@ -37,13 +41,30 @@ func addFile(fd *desc.FileDescriptor, dst []*descriptorpb.FileDescriptorProto) [
 	return dst
 }
 
+// parseProto runs the plugin over a proto file and requires it to succeed.
 func parseProto(t *testing.T, path string, opts ...PluginOption) *pluginpb.CodeGeneratorResponse {
+	t.Helper()
+	response, err := runProto(t, path, nil, opts...)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	return response
+}
+
+// runProtoSource runs the plugin over an inline proto source, which may import the repository protos.
+func runProtoSource(t *testing.T, source string, opts ...PluginOption) (*pluginpb.CodeGeneratorResponse, error) {
+	t.Helper()
+	const path = "inline.proto"
+	return runProto(t, path, map[string]string{path: source}, opts...)
+}
+
+// runProto runs the plugin over a proto file, reading the files in sources instead of the disk.
+func runProto(t *testing.T, path string, sources map[string]string, opts ...PluginOption) (*pluginpb.CodeGeneratorResponse, error) {
+	t.Helper()
 	p := &Plugin{}
 	for _, o := range opts {
 		o(p)
 	}
 
-	t.Helper()
 	parser := protoparse.Parser{
 		ImportPaths: []string{
 			".",
@@ -52,11 +73,15 @@ func parseProto(t *testing.T, path string, opts ...PluginOption) *pluginpb.CodeG
 		},
 		IncludeSourceCodeInfo: true,
 		InferImportPaths:      false,
+		Accessor: func(filename string) (io.ReadCloser, error) {
+			if source, ok := sources[filename]; ok {
+				return io.NopCloser(strings.NewReader(source)), nil
+			}
+			return os.Open(filename)
+		},
 	}
 	fds, err := parser.ParseFiles(path)
-	if err != nil {
-		return nil
-	}
+	require.NoError(t, err)
 
 	var fdps []*descriptorpb.FileDescriptorProto
 	for _, fd := range fds {
@@ -69,16 +94,12 @@ func parseProto(t *testing.T, path string, opts ...PluginOption) *pluginpb.CodeG
 	}
 
 	plugin, err := protogen.Options{}.New(req)
-	if !assert.NoError(t, err) {
-		return nil
-	}
+	require.NoError(t, err)
 
-	err = p.Run(plugin)
-	if err != nil {
-		return nil
+	if err := p.Run(plugin); err != nil {
+		return nil, err
 	}
-
-	return plugin.Response()
+	return plugin.Response(), nil
 }
 
 func TestNoCRD(t *testing.T) {
@@ -275,7 +296,229 @@ func TestSchemaless(t *testing.T) {
 		},
 	}, schema.Value())
 
-	assert.Nil(t, parseProto(t, "testdata/client_spec.proto", WithSchemalessCrd(true), WithClientSchema(true)))
+	_, err := runProto(t, "testdata/client_spec.proto", nil, WithSchemalessCrd(true), WithClientSchema(true))
+	assert.Error(t, err)
+}
+
+// crdProperties runs the plugin over a proto and returns the properties of the CRD root schema.
+func crdProperties(t *testing.T, path string, opts ...PluginOption) SchemaWrapper {
+	t.Helper()
+	response := parseProto(t, path, opts...)
+	require.Len(t, response.File, 1)
+
+	apiSpec := SchemaWrapper{any: map[string]any{}}
+	require.NoError(t, yaml.Unmarshal([]byte(response.File[0].GetContent()), &apiSpec.any))
+	return apiSpec.Key("spec").Key("versions").Index(0).Key("schema").Key("openAPIV3Schema").Key("properties")
+}
+
+// extensionsOf returns the x-kubernetes map and list type markers of a schema.
+func extensionsOf(schema SchemaWrapper) map[string]any {
+	markers := map[string]any{}
+	for key, value := range schema.Value().(map[string]any) {
+		if key == mapTypeField || key == listTypeField || key == listMapKeysField {
+			markers[key] = value
+		}
+	}
+	return markers
+}
+
+func TestTopology(t *testing.T) {
+	for name, opts := range map[string][]PluginOption{
+		"default": nil,
+		"strict":  {WithScrictSchema(true)},
+		"client":  {WithClientSchema(true), WithGeneratingMergeKeys(true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			properties := crdProperties(t, "testdata/topology.proto", opts...)
+			spec := properties.Key("spec").Key("properties")
+
+			for field, want := range map[string]map[string]any{
+				"atomic_message":          {mapTypeField: "atomic"},
+				"granular_message":        {mapTypeField: "granular"},
+				"atomic_map":              {mapTypeField: "atomic"},
+				"atomic_list":             {listTypeField: "atomic"},
+				"string_set":              {listTypeField: "set"},
+				"item_map":                {listTypeField: "map", listMapKeysField: []any{"name"}},
+				"atomic_struct":           {mapTypeField: "atomic"},
+				"by_type":                 {mapTypeField: "atomic"},
+				"by_type_over_annotation": {mapTypeField: "atomic"},
+				"by_path":                 {mapTypeField: "atomic"},
+				"reset_by_path":           {},
+				"plain":                   {},
+				"int_set":                 {listTypeField: "set"},
+				"holders":                 {mapTypeField: "atomic"},
+			} {
+				assert.Equal(t, want, extensionsOf(spec.Key(field)), field)
+			}
+
+			holderValue := spec.Key("holders").Key("additionalProperties")
+			assert.Empty(t, extensionsOf(holderValue))
+			assert.Equal(t, map[string]any{mapTypeField: "atomic"}, extensionsOf(holderValue.Key("properties").Key("inner")))
+
+			items := spec.Key("item_map").Key("items").Value().(map[string]any)
+			assert.Equal(t, []any{"name"}, items["required"])
+			assert.NotContains(t, items, "nullable")
+
+			assert.Equal(t, map[string]any{mapTypeField: "granular"}, extensionsOf(properties.Key("spec")))
+			assert.Equal(t, map[string]any{mapTypeField: "atomic"}, extensionsOf(properties.Key("status")))
+		})
+	}
+}
+
+func TestTopologyKeepsPatchMergeKey(t *testing.T) {
+	properties := crdProperties(t, "testdata/topology.proto", WithClientSchema(true), WithGeneratingMergeKeys(true))
+	itemMap := properties.Key("spec").Key("properties").Key("item_map").Value().(map[string]any)
+	assert.Equal(t, "name", itemMap[patchMergeKeyField])
+	assert.Equal(t, "merge", itemMap[patchMergeStrategyField])
+}
+
+func TestTopologySchemaless(t *testing.T) {
+	properties := crdProperties(t, "testdata/topology.proto", WithSchemalessCrd(true))
+	assert.Equal(t, map[string]any{
+		"spec": map[string]any{
+			"x-kubernetes-preserve-unknown-fields": true,
+			"x-kubernetes-map-type":                "granular",
+			"type":                                 "object",
+			"description":                          "Desired state.",
+		},
+		"status": map[string]any{
+			"x-kubernetes-preserve-unknown-fields": true,
+			"x-kubernetes-map-type":                "atomic",
+			"type":                                 "object",
+			"description":                          "Observed state.",
+		},
+	}, properties.Value())
+}
+
+func TestTopologyErrors(t *testing.T) {
+	const header = `
+syntax = "proto3";
+package testdata;
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+message Item {
+    string name = 1;
+    optional string optional_name = 2;
+    Item nested = 3;
+}
+message Status {}
+`
+	crd := func(specFields string, crdOptions string) string {
+		return header + `
+message Spec {
+` + specFields + `
+}
+message Kind {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group", kind: "Kind", plural: "kinds", singular: "kind"` + crdOptions + `
+    };
+    Spec spec = 1;
+    Status status = 2;
+}
+`
+	}
+
+	for name, tc := range map[string]struct {
+		source  string
+		wantErr string
+	}{
+		"set on scalar": {
+			crd(`string f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			`field testdata.Spec.f: k8s_topology KT_SET: requires a list, the field renders as "string"`,
+		},
+		"granular on list": {
+			crd(`repeated string f = 1 [(protoc_gen_crd.k8s_topology) = KT_GRANULAR];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_GRANULAR: requires an object or a map, the field renders as a list",
+		},
+		"set on object": {
+			crd(`Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_SET: requires a list, the field renders as an object",
+		},
+		"set of objects": {
+			crd(`repeated Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_SET: requires scalar list items, the items render as an object",
+		},
+		"set of list values": {
+			crd(`google.protobuf.ListValue f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_SET: requires scalar list items, the items render as an untyped value",
+		},
+		"set of json values": {
+			crd(`repeated google.protobuf.Value f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_SET: requires scalar list items, the items render as an untyped value",
+		},
+		"set of nullable wrappers": {
+			crd(`repeated google.protobuf.StringValue f = 1 [(protoc_gen_crd.k8s_topology) = KT_SET];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_SET: requires non-nullable list items",
+		},
+		"map without merge key": {
+			crd(`repeated Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_MAP];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_MAP: requires the k8s_patch merge_key of the field as the list key",
+		},
+		"map of scalars": {
+			crd(`repeated string f = 1 [(protoc_gen_crd.k8s_topology) = KT_MAP, (protoc_gen_crd.k8s_patch) = {merge_key: "name"}];`, ""),
+			"field testdata.Spec.f: k8s_topology KT_MAP: requires a list of objects",
+		},
+		"map with absent key": {
+			crd(`repeated Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_MAP, (protoc_gen_crd.k8s_patch) = {merge_key: "absent"}];`, ""),
+			`field testdata.Spec.f: k8s_topology KT_MAP: list key "absent" is not a field of the list items`,
+		},
+		"map with object key": {
+			crd(`repeated Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_MAP, (protoc_gen_crd.k8s_patch) = {merge_key: "nested"}];`, ""),
+			`field testdata.Spec.f: k8s_topology KT_MAP: list key "nested" must be a scalar field, it renders as an object`,
+		},
+		"map with optional key": {
+			crd(`repeated Item f = 1 [(protoc_gen_crd.k8s_topology) = KT_MAP, (protoc_gen_crd.k8s_patch) = {merge_key: "optional_name"}];`, ""),
+			`field testdata.Spec.f: k8s_topology KT_MAP: list key "optional_name" must not be optional`,
+		},
+		"atomic timestamp": {
+			crd(`google.protobuf.Timestamp f = 1 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];`, ""),
+			`field testdata.Spec.f: k8s_topology KT_ATOMIC: requires an object, a map or a list, the field renders as "string"`,
+		},
+		"map on root": {
+			crd(``, `, field_topologies: [{field_path: "status", topology: KT_MAP}]`),
+			"field testdata.Kind.status: k8s_topology KT_MAP: requires a list, the field renders as an object",
+		},
+		"selector without target": {
+			crd(``, `, field_topologies: [{field_path: "spec", topology: KT_ATOMIC}, {topology: KT_ATOMIC}]`),
+			"Kind: field_topologies[1]: selector without protobuf_type or field_path",
+		},
+		"selector with empty field_path": {
+			crd(``, `, field_topologies: [{field_path: "", topology: KT_ATOMIC}]`),
+			"Kind: field_topologies[0]: empty field_path",
+		},
+		"selector with empty protobuf_type": {
+			crd(``, `, field_topologies: [{field_path: "spec", topology: KT_ATOMIC}, {protobuf_type: "testdata.Spec", topology: KT_ATOMIC}, {protobuf_type: "", topology: KT_ATOMIC}]`),
+			"Kind: field_topologies[2]: empty protobuf_type",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := runProtoSource(t, tc.source)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+func TestTopologyErrorsInSchemaless(t *testing.T) {
+	source := `
+syntax = "proto3";
+package testdata;
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+message Spec {}
+message Status {}
+message Kind {
+    option (protoc_gen_crd.k8s_crd) = {api_group: "group", kind: "Kind", plural: "kinds", singular: "kind"};
+    Spec spec = 1;
+    Status status = 2 [(protoc_gen_crd.k8s_topology) = KT_SET];
+}
+`
+	_, err := runProtoSource(t, source, WithSchemalessCrd(true))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "field testdata.Kind.status: k8s_topology KT_SET: requires a list, the field renders as an object")
 }
 
 func TestPatchExternals(t *testing.T) {

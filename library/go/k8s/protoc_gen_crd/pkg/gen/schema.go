@@ -25,6 +25,9 @@ const (
 
 	intOrStringField           = "x-kubernetes-int-or-string"
 	preserveUnknownFieldsField = "x-kubernetes-preserve-unknown-fields"
+	mapTypeField               = "x-kubernetes-map-type"
+	listTypeField              = "x-kubernetes-list-type"
+	listMapKeysField           = "x-kubernetes-list-map-keys"
 )
 
 var requiredRootSchemalessFields = []string{"spec", "status"}
@@ -58,11 +61,14 @@ var preserveUnknownFieldsExtension = &v3.NamedAny{
 	Value: &v3.Any{Yaml: "true"},
 }
 
-var opaqueSchema = &v3.SchemaOrReference{
-	Oneof: &v3.SchemaOrReference_Schema{Schema: &v3.Schema{
-		Type:                   "object",
-		SpecificationExtension: []*v3.NamedAny{preserveUnknownFieldsExtension},
-	}},
+// newOpaqueSchema returns an object schema of unknown structure.
+func newOpaqueSchema() *v3.SchemaOrReference {
+	return &v3.SchemaOrReference{
+		Oneof: &v3.SchemaOrReference_Schema{Schema: &v3.Schema{
+			Type:                   "object",
+			SpecificationExtension: []*v3.NamedAny{preserveUnknownFieldsExtension},
+		}},
+	}
 }
 
 func makeStringAny(s string) *v3.Any {
@@ -94,9 +100,23 @@ type Schema struct {
 	isStrictSchema               bool
 	isGeneratingMergeKeysEnabled bool
 
-	linterRulePattern *regexp.Regexp
-	typePatchRules    map[string]*crd.K8SPatch
-	fieldPatchRules   *RadixTree[*crd.K8SPatch]
+	linterRulePattern  *regexp.Regexp
+	typePatchRules     map[string]*crd.K8SPatch
+	fieldPatchRules    *RadixTree[*crd.K8SPatch]
+	typeTopologyRules  map[string]crd.K8STopology
+	fieldTopologyRules *RadixTree[crd.K8STopology]
+
+	errs []error
+}
+
+// fieldRules holds the field_path selector rules applying at the current position of the schema walk.
+type fieldRules struct {
+	patch    *RadixTree[*crd.K8SPatch]
+	topology *RadixTree[crd.K8STopology]
+}
+
+func (r fieldRules) Child(name string) fieldRules {
+	return fieldRules{patch: r.patch.Child(name), topology: r.topology.Child(name)}
 }
 
 func fullMessageTypeName(message protoreflect.MessageDescriptor) string {
@@ -144,7 +164,7 @@ func (s *Schema) getPatchAnnotation(field *protogen.Field, fieldTree *RadixTree[
 
 }
 
-func (s *Schema) buildPatchRules() {
+func (s *Schema) buildRules() {
 	typeMap := make(map[string]*crd.K8SPatch)
 	pathMap := NewRadixTree[*crd.K8SPatch]()
 	for _, rule := range s.metadata.GetFieldPatchStrategies() {
@@ -160,6 +180,193 @@ func (s *Schema) buildPatchRules() {
 
 	s.typePatchRules = typeMap
 	s.fieldPatchRules = pathMap
+
+	typeTopology := make(map[string]crd.K8STopology)
+	pathTopology := NewRadixTree[crd.K8STopology]()
+	for i, rule := range s.metadata.GetFieldTopologies() {
+		switch target := rule.GetTarget().(type) {
+		case *crd.K8STopologySelector_ProtobufType:
+			if target.ProtobufType == "" {
+				s.errs = append(s.errs, fmt.Errorf("%s: field_topologies[%d]: empty protobuf_type", s.metadata.GetKind(), i))
+				continue
+			}
+			typeTopology[target.ProtobufType] = rule.GetTopology()
+		case *crd.K8STopologySelector_FieldPath:
+			if target.FieldPath == "" {
+				s.errs = append(s.errs, fmt.Errorf("%s: field_topologies[%d]: empty field_path", s.metadata.GetKind(), i))
+				continue
+			}
+			pathTopology.Add(strings.Split(target.FieldPath, "."), rule.GetTopology())
+		default:
+			s.errs = append(s.errs, fmt.Errorf("%s: field_topologies[%d]: selector without protobuf_type or field_path", s.metadata.GetKind(), i))
+		}
+	}
+
+	s.typeTopologyRules = typeTopology
+	s.fieldTopologyRules = pathTopology
+}
+
+// getTopology returns the server-side apply topology of the field: a field_path selector,
+// then a protobuf_type selector, then the k8s_topology option of the field.
+func (s *Schema) getTopology(field *protogen.Field, tree *RadixTree[crd.K8STopology]) crd.K8STopology {
+	if rule, ok := tree.Value(); ok {
+		return *rule
+	}
+
+	if field.Message != nil {
+		if rule, ok := s.typeTopologyRules[string(field.Message.Desc.FullName())]; ok {
+			return rule
+		}
+	} else if field.Enum != nil {
+		if rule, ok := s.typeTopologyRules[string(field.Enum.Desc.FullName())]; ok {
+			return rule
+		}
+	}
+
+	ext := getMessageExtension(field, crd.E_K8STopology)
+	if ext == nil {
+		return crd.K8STopology_KT_DEFAULT
+	}
+	return ext.(crd.K8STopology)
+}
+
+// applyTopology marks the rendered schema of the field with its server-side apply topology,
+// recording an error when the topology does not fit the schema.
+func (s *Schema) applyTopology(field *protogen.Field, schema *v3.Schema, topology crd.K8STopology, mergeKey string) {
+	if topology == crd.K8STopology_KT_DEFAULT {
+		return
+	}
+	if err := setTopology(schema, topology, mergeKey); err != nil {
+		s.errs = append(s.errs, fmt.Errorf("field %s: k8s_topology %s: %w", field.Desc.FullName(), topology, err))
+	}
+}
+
+// setTopology adds the Kubernetes map or list type markers of the topology to the schema.
+// For KT_MAP the list items are made non-nullable and the key required, as the API server demands.
+func setTopology(schema *v3.Schema, topology crd.K8STopology, mergeKey string) error {
+	isObject := schema.GetType() == "object"
+	isList := schema.GetType() == "array"
+	switch topology {
+	case crd.K8STopology_KT_ATOMIC, crd.K8STopology_KT_GRANULAR:
+		switch {
+		case isObject:
+			value := "atomic"
+			if topology == crd.K8STopology_KT_GRANULAR {
+				value = "granular"
+			}
+			addExtension(schema, mapTypeField, makeStringAny(value))
+		case isList && topology == crd.K8STopology_KT_ATOMIC:
+			addExtension(schema, listTypeField, makeStringAny("atomic"))
+		case isList:
+			return fmt.Errorf("requires an object or a map, the field renders as %s", renderedType(schema))
+		default:
+			return fmt.Errorf("requires an object, a map or a list, the field renders as %s", renderedType(schema))
+		}
+	case crd.K8STopology_KT_SET:
+		if !isList {
+			return fmt.Errorf("requires a list, the field renders as %s", renderedType(schema))
+		}
+		items := arrayItems(schema)
+		if items == nil {
+			return fmt.Errorf("requires a single list item schema")
+		}
+		if !isScalar(items) {
+			return fmt.Errorf("requires scalar list items, the items render as %s", renderedType(items))
+		}
+		if items.GetNullable() {
+			return fmt.Errorf("requires non-nullable list items")
+		}
+		addExtension(schema, listTypeField, makeStringAny("set"))
+	case crd.K8STopology_KT_MAP:
+		if !isList {
+			return fmt.Errorf("requires a list, the field renders as %s", renderedType(schema))
+		}
+		if mergeKey == "" {
+			return fmt.Errorf("requires the k8s_patch merge_key of the field as the list key")
+		}
+		items := arrayItems(schema)
+		if items == nil || items.GetType() != "object" {
+			return fmt.Errorf("requires a list of objects")
+		}
+		key := objectProperty(items, mergeKey)
+		if key == nil {
+			return fmt.Errorf("list key %q is not a field of the list items", mergeKey)
+		}
+		if !isScalar(key) {
+			return fmt.Errorf("list key %q must be a scalar field, it renders as %s", mergeKey, renderedType(key))
+		}
+		if key.GetNullable() {
+			return fmt.Errorf("list key %q must not be optional", mergeKey)
+		}
+		items.Nullable = false
+		if !slices.Contains(items.Required, mergeKey) {
+			items.Required = append(items.Required, mergeKey)
+		}
+		addExtension(schema, listTypeField, makeStringAny("map"))
+		addExtension(schema, listMapKeysField, &v3.Any{Yaml: fmt.Sprintf("[%q]", mergeKey)})
+	default:
+		return fmt.Errorf("unknown topology")
+	}
+	return nil
+}
+
+// isScalar reports whether the schema admits only scalar values: a typed scalar or an int-or-string.
+func isScalar(schema *v3.Schema) bool {
+	switch schema.GetType() {
+	case "object", "array":
+		return false
+	case "":
+		return hasExtension(schema, intOrStringField)
+	}
+	return true
+}
+
+func hasExtension(schema *v3.Schema, name string) bool {
+	for _, extension := range schema.GetSpecificationExtension() {
+		if extension.GetName() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// renderedType names the rendered type of the schema for error messages.
+func renderedType(schema *v3.Schema) string {
+	switch {
+	case schema.GetType() == "object":
+		return "an object"
+	case schema.GetType() == "array":
+		return "a list"
+	case schema.GetType() != "":
+		return fmt.Sprintf("%q", schema.GetType())
+	case hasExtension(schema, intOrStringField):
+		return "an integer or a string"
+	default:
+		return "an untyped value"
+	}
+}
+
+func addExtension(schema *v3.Schema, name string, value *v3.Any) {
+	schema.SpecificationExtension = append(schema.SpecificationExtension, &v3.NamedAny{Name: name, Value: value})
+}
+
+// arrayItems returns the inline item schema of an array schema, nil when there is no single one.
+func arrayItems(schema *v3.Schema) *v3.Schema {
+	items := schema.GetItems().GetSchemaOrReference()
+	if len(items) != 1 {
+		return nil
+	}
+	return items[0].GetSchema()
+}
+
+// objectProperty returns the inline schema of the named property of an object schema.
+func objectProperty(schema *v3.Schema, name string) *v3.Schema {
+	for _, property := range schema.GetProperties().GetAdditionalProperties() {
+		if property.GetName() == name {
+			return property.GetValue().GetSchema()
+		}
+	}
+	return nil
 }
 
 func (s *Schema) needAddToSchema(message *protogen.Field) bool {
@@ -272,7 +479,7 @@ func (s *Schema) schemaReferenceForTypeName(typeName string) string {
 	return "#/components/schemas/" + s.formatMessageRef(lastPart)
 }
 
-func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *protogen.Message, rules fieldRules) *v3.SchemaOrReference {
 	switch typeName {
 
 	// TODO (torkve) Create oneof here: we probably should allow user to provide either formatted string (RFC3339 etc)
@@ -423,38 +630,61 @@ func (s *Schema) schemaOrReferenceForTypeOrMessage(typeName string, message *pro
 			},
 		}
 	default:
-		return s.schemaForMessage(message, false, fieldTree)
+		return s.schemaForMessage(message, false, rules)
 	}
 }
 
-func (s *Schema) schemaOrReferenceForField(field *protogen.Field, isRootField bool, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
+func (s *Schema) schemaOrReferenceForField(field *protogen.Field, isRootField bool, rules fieldRules) *v3.SchemaOrReference {
 	if !s.needAddToSchema(field) {
 		return nil
 	}
+	topology := s.getTopology(field, rules.topology)
 	// for schemaless, ignore all fields except spec and status
 	if s.isSchemaless {
-		if isRootField && slices.Contains(requiredRootSchemalessFields, string(field.Desc.Name())) {
-			return opaqueSchema
+		name := string(field.Desc.Name())
+		if isRootField && slices.Contains(requiredRootSchemalessFields, name) {
+			schema := newOpaqueSchema()
+			s.applyTopology(field, schema.GetSchema(), topology, "")
+			return schema
 		}
 		return nil
 	}
-	patchAnnotation := s.getPatchAnnotation(field, fieldTree)
+	patchAnnotation := s.getPatchAnnotation(field, rules.patch)
+
+	var kindSchema *v3.SchemaOrReference
 	if field.Desc.IsMap() {
 		mapMessage := field.Message.Fields[1]
-		return &v3.SchemaOrReference{
+		kindSchema = &v3.SchemaOrReference{
 			Oneof: &v3.SchemaOrReference_Schema{
 				Schema: &v3.Schema{Type: "object",
 					AdditionalProperties: &v3.AdditionalPropertiesItem{
 						Oneof: &v3.AdditionalPropertiesItem_SchemaOrReference{
-							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, false, fieldTree),
+							SchemaOrReference: s.schemaOrReferenceForField(mapMessage, false, fieldRules{patch: rules.patch, topology: rules.topology.Children()}),
 						},
 					},
-					SpecificationExtension: s.makeSpecificationExtension(patchAnnotation),
 				},
 			},
 		}
+	} else {
+		kindSchema = s.schemaOrReferenceForValueField(field, rules)
+		if kindSchema == nil {
+			return nil
+		}
 	}
 
+	if schema := kindSchema.GetSchema(); patchAnnotation != nil && schema != nil {
+		schema.SpecificationExtension = append(schema.SpecificationExtension, s.makeSpecificationExtension(patchAnnotation)...)
+		s.insertFakeMergeKeyIfNeeded(schema, patchAnnotation)
+	}
+	if schema := kindSchema.GetSchema(); schema != nil {
+		s.applyTopology(field, schema, topology, patchAnnotation.GetMergeKey())
+	}
+
+	return kindSchema
+}
+
+// schemaOrReferenceForValueField renders a non-map field: a scalar, a message or a list of them.
+func (s *Schema) schemaOrReferenceForValueField(field *protogen.Field, rules fieldRules) *v3.SchemaOrReference {
 	var kindSchema *v3.SchemaOrReference
 
 	fieldDescription := s.filterCommentString(field.Comments.Leading, true)
@@ -466,7 +696,7 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, isRootField bo
 
 	case protoreflect.MessageKind:
 		typeName := string(field.Desc.Message().FullName())
-		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message, fieldTree)
+		kindSchema = s.schemaOrReferenceForTypeOrMessage(typeName, field.Message, rules)
 		if kindSchema == nil {
 			return nil
 		}
@@ -545,19 +775,14 @@ func (s *Schema) schemaOrReferenceForField(field *protogen.Field, isRootField bo
 		}
 	}
 
-	if schema := kindSchema.GetSchema(); patchAnnotation != nil && schema != nil {
-		schema.SpecificationExtension = append(schema.SpecificationExtension, s.makeSpecificationExtension(patchAnnotation)...)
-		s.insertFakeMergeKeyIfNeeded(schema, patchAnnotation)
-	}
-
 	return kindSchema
 }
 
-func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldTree *RadixTree[*crd.K8SPatch]) *v3.SchemaOrReference {
+func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, rules fieldRules) *v3.SchemaOrReference {
 	typename := fullMessageTypeName(message.Desc)
 
 	if s.typesStack[typename] {
-		return opaqueSchema
+		return newOpaqueSchema()
 	}
 
 	messageDescription := s.filterCommentString(message.Comments.Leading, true)
@@ -572,7 +797,7 @@ func (s *Schema) schemaForMessage(message *protogen.Message, isRoot bool, fieldT
 
 	for _, field := range message.Fields {
 		// The field is either described by a reference or a schema.
-		fieldSchema := s.schemaOrReferenceForField(field, isRoot, fieldTree.Child(s.formatFieldName(field)))
+		fieldSchema := s.schemaOrReferenceForField(field, isRoot, rules.Child(s.formatFieldName(field)))
 		if fieldSchema == nil {
 			continue
 		}
@@ -646,12 +871,12 @@ func (s *Schema) addSchemas(messages []*protogen.Message) {
 			continue
 		}
 		s.metadata = extension.(*crd.K8SCRD)
-		s.buildPatchRules()
+		s.buildRules()
 
 		s.schemas.AdditionalProperties = append(s.schemas.AdditionalProperties,
 			&v3.NamedSchemaOrReference{
 				Name:  s.formatMessageName(message),
-				Value: s.schemaForMessage(message, true, s.fieldPatchRules),
+				Value: s.schemaForMessage(message, true, fieldRules{patch: s.fieldPatchRules, topology: s.fieldTopologyRules}),
 			},
 		)
 	}

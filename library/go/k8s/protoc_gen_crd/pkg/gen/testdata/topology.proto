@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package testdata;
+
+import "google/protobuf/struct.proto";
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+
+message TopologyItem {
+    string name = 1;
+    string value = 2;
+}
+
+message TopologyNested {
+    string f1 = 1;
+}
+
+message TopologyByType {
+    string f1 = 1;
+}
+
+message TopologyHolder {
+    TopologyNested inner = 1;
+}
+
+message TopologySpec {
+    TopologyNested atomic_message = 1 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+    TopologyNested granular_message = 2 [(protoc_gen_crd.k8s_topology) = KT_GRANULAR];
+    map<string, string> atomic_map = 3 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+    repeated string atomic_list = 4 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+    repeated string string_set = 5 [(protoc_gen_crd.k8s_topology) = KT_SET];
+    repeated TopologyItem item_map = 6 [
+        (protoc_gen_crd.k8s_topology) = KT_MAP,
+        (protoc_gen_crd.k8s_patch) = {merge_key: "name", merge_strategy: "merge"}
+    ];
+    google.protobuf.Struct atomic_struct = 7 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+    TopologyByType by_type = 8;
+    TopologyByType by_type_over_annotation = 9 [(protoc_gen_crd.k8s_topology) = KT_GRANULAR];
+    TopologyNested by_path = 10;
+    TopologyNested reset_by_path = 11 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+    TopologyNested plain = 12;
+    repeated int64 int_set = 13 [(protoc_gen_crd.k8s_topology) = KT_SET];
+    map<string, TopologyHolder> holders = 14;
+}
+
+message TopologyStatus {
+    string f1 = 1;
+}
+
+message TopologyKind {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "group",
+        kind: "TopologyKind",
+        plural: "topologykinds",
+        singular: "topologykind",
+        field_topologies: [
+            {field_path: "spec", topology: KT_GRANULAR},
+            {protobuf_type: "testdata.TopologyByType", topology: KT_ATOMIC},
+            {field_path: "spec.by_path", topology: KT_ATOMIC},
+            {field_path: "spec.reset_by_path", topology: KT_DEFAULT},
+            {field_path: "spec.holders", topology: KT_ATOMIC},
+            {field_path: "spec.holders.inner", topology: KT_ATOMIC}
+        ]
+    };
+
+    // Desired state.
+    TopologySpec spec = 1;
+    // Observed state.
+    TopologyStatus status = 2 [(protoc_gen_crd.k8s_topology) = KT_ATOMIC];
+}
