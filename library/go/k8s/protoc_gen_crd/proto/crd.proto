@@ -117,6 +117,8 @@ message K8sCRD {
     // or field names (e.g. "status"), that should have the given server-side apply topology.
     // This option overrides K8sTopology option set on the field, and field targeted rules has precedence over type targeted ones.
     repeated K8sTopologySelector field_topologies = 10;
+    // Annotations added to the generated CRD metadata.
+    map<string, string> annotations = 11;
 }
 
 message K8sPatch {

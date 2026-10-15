@@ -84,6 +84,8 @@ message Human {
         plural: "humans",
         singular: "human",
         categories: ["all", "example"],
+        annotations: {key: "example.com/owner", value: "team-a"},
+        annotations: {key: "example.com/contact", value: "oncall"},
         additional_columns: [
             {
                 name: "Gen",

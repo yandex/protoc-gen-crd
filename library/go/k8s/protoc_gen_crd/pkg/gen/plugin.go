@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 
 	"github.com/google/gnostic/compiler"
 	v3 "github.com/google/gnostic/openapiv3"
@@ -145,8 +146,18 @@ func (p *Plugin) Run(plugin *protogen.Plugin) error {
 		metadata.Content = append(metadata.Content, compiler.NewScalarNodeForString("name"))
 		metadata.Content = append(metadata.Content, compiler.NewScalarNodeForString(schema.metadata.Plural+"."+schema.metadata.ApiGroup))
 
+		annotations := compiler.NewMappingNode()
+		annotationKeys := make([]string, 0, len(schema.metadata.Annotations))
+		for key := range schema.metadata.Annotations {
+			annotationKeys = append(annotationKeys, key)
+		}
+		sort.Strings(annotationKeys)
+		for _, key := range annotationKeys {
+			annotations.Content = append(annotations.Content, compiler.NewScalarNodeForString(key))
+			annotations.Content = append(annotations.Content, compiler.NewScalarNodeForString(schema.metadata.Annotations[key]))
+		}
 		metadata.Content = append(metadata.Content, compiler.NewScalarNodeForString("annotations"))
-		metadata.Content = append(metadata.Content, compiler.NewMappingNode())
+		metadata.Content = append(metadata.Content, annotations)
 
 		header.Content = append(header.Content, compiler.NewScalarNodeForString("metadata"))
 		header.Content = append(header.Content, metadata)

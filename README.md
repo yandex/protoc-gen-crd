@@ -85,6 +85,29 @@ This will give you `proto/mycrd.crd.yaml`, which can be put with `kubectl apply 
 
 Also see full example with protobuf and Makefile in the `example/` subdirectory.
 
+CRD metadata annotations
+------------------------
+
+The optional `annotations` entries are written to the generated CRD's `metadata.annotations`
+in every output mode (standard, client/kustomize, strict, and schemaless). Add one entry per annotation:
+
+```protobuf
+message MyCrdKind {
+    option (protoc_gen_crd.k8s_crd) = {
+           api_group: "my-api.my-company.org",
+           kind: "MyCrdKind",
+           plural: "mycrdkinds",
+           singular: "mycrdkind",
+           annotations: {key: "example.com/owner", value: "team-a"},
+    };
+
+    Spec spec = 1;
+    Status status = 2;
+}
+```
+
+Keys are emitted in sorted order for reproducible output; without entries the CRD retains `annotations: {}`.
+
 Kustomize patch hints
 ---------------------
 

@@ -124,6 +124,64 @@ func TestTwoCRDs(t *testing.T) {
 	assert.Empty(t, response.File)
 }
 
+func TestCRDAnnotations(t *testing.T) {
+	const annotatedSource = `syntax = "proto3";
+package testdata;
+option go_package = "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/pkg/gen/testdata";
+import "library/go/k8s/protoc_gen_crd/proto/crd.proto";
+message Spec {}
+message Status {}
+message Annotated {
+    option (protoc_gen_crd.k8s_crd) = {
+        api_group: "example.com",
+        kind: "Annotated",
+        plural: "annotateds",
+        singular: "annotated",
+        annotations: {key: "z.example.com/second", value: "on"},
+        annotations: {key: "a.example.com/first", value: "first"},
+    };
+    Spec spec = 1;
+    Status status = 2;
+}`
+
+	for _, tc := range []struct {
+		name   string
+		suffix string
+		opts   []PluginOption
+	}{
+		{name: "default", suffix: ".crd.yaml"},
+		{name: "client", suffix: ".kustomize.yaml", opts: []PluginOption{WithClientSchema(true)}},
+		{name: "schemaless", suffix: ".schemaless.yaml", opts: []PluginOption{WithSchemalessCrd(true)}},
+		{name: "strict", suffix: ".strict.yaml", opts: []PluginOption{WithScrictSchema(true)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			empty := parseProto(t, "testdata/simple_spec.proto", tc.opts...)
+			require.Len(t, empty.File, 1)
+			assert.True(t, strings.HasSuffix(empty.File[0].GetName(), tc.suffix))
+			assert.Contains(t, empty.File[0].GetContent(), "annotations: {}")
+
+			response, err := runProtoSource(t, annotatedSource, tc.opts...)
+			require.NoError(t, err)
+			require.Len(t, response.File, 1)
+			assert.True(t, strings.HasSuffix(response.File[0].GetName(), tc.suffix))
+			content := response.File[0].GetContent()
+			first := strings.Index(content, "a.example.com/first")
+			second := strings.Index(content, "z.example.com/second")
+			require.NotEqual(t, -1, first)
+			require.NotEqual(t, -1, second)
+			assert.Less(t, first, second)
+
+			var crd map[string]any
+			require.NoError(t, yaml.Unmarshal([]byte(content), &crd))
+			metadata := crd["metadata"].(map[string]any)
+			assert.Equal(t, map[string]any{
+				"a.example.com/first":  "first",
+				"z.example.com/second": "on",
+			}, metadata["annotations"])
+		})
+	}
+}
+
 func TestSimpleSpec(t *testing.T) {
 	response := parseProto(t, "testdata/simple_spec.proto")
 	if response == nil {
