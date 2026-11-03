@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/gnostic/compiler"
 	v3 "github.com/google/gnostic/openapiv3"
+	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/pluginpb"
-	"gopkg.in/yaml.v3"
 
 	crd "github.com/yandex/protoc-gen-crd/library/go/k8s/protoc_gen_crd/proto"
 )

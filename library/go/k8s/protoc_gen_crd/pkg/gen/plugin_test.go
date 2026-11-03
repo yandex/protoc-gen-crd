@@ -11,10 +11,10 @@ import (
 	"github.com/jhump/protoreflect/desc/protoparse"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v3"
 	"google.golang.org/protobuf/compiler/protogen"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/pluginpb"
-	"gopkg.in/yaml.v3"
 )
 
 type SchemaWrapper struct {
